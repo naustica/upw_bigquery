@@ -1,0 +1,73 @@
+---
+title: "Preparing und Uploading Unpawall data to BigQuery"
+description:
+author: 
+  - Nick Haupka
+date: January 11, 2020
+preview: distill-preview.png
+creative_commons: CC BY
+output: distill::distill_article
+---
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  echo = TRUE
+)
+```
+
+## Creating a Project
+
+## Installing and config gsutil
+
+```{bash eval=FALSE}
+sudo pip install gsutil
+```
+
+```{bash eval=FALSE}
+gsutil config
+```
+
+## Preparing data
+
+```{bash eval=FALSE}
+mkdir upw_export
+
+mkdir upw_export/upw_snapshot
+
+wget -P upw_export \
+https://s3-us-west-2.amazonaws.com/unpaywall-data-snapshots/unpaywall_snapshot_2020-04-27T153236.jsonl.gz
+```
+
+```{bash eval=FALSE}
+zcat upw_export/unpaywall_snapshot_2020-04-27T153236.jsonl.gz | parallel \
+--pipe --block 100M --jobs 6 --files --tmpdir upw_export/upw_snapshot --recend \
+'}\n' "jq -c 'select(.year >= 2018 and .year <= 2019) | {doi, is_oa, oa_locations, oa_status, publisher}'"
+```
+
+## Uploading data
+
+```{bash eval=FALSE}
+for file in upw_export/upw_snapshot/*.par
+do
+  mv "$file" "${file%.par}.jsonl"
+done
+
+gzip -r upw_export/upw_snapshot
+```
+
+```{bash eval=FALSE}
+gsutil -m cp -r upw_export/upw_snapshot gs://oadoi_full
+```
+
+## Creating Table
+
+```{bash eval=FALSE}
+bq load --ignore_unknown_values --source_format=NEWLINE_DELIMITED_JSON \
+your-project:oadoi_full.<name-of-bq-table> \
+gs://oadoi_full/<name-of-snapshot-directory>/*.jsonl.gz \
+bq_schema_<snapshot-abbreviation>.json
+```
