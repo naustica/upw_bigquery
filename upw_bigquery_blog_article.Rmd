@@ -1,9 +1,9 @@
 ---
-title: "Preparing und Uploading Unpawall data to BigQuery"
-description:
+title: "Preparing and Uploading Unpawall data to BigQuery"
+description: Working with large datasets is generally non-trivial. In this blog post, I demonstrate how to process and import data snapshots from Unpaywall to Google BigQuery. 
 author: 
   - Nick Haupka
-date: January 11, 2020
+date: January 18, 2020
 preview: distill-preview.png
 creative_commons: CC BY
 output: distill::distill_article
@@ -19,19 +19,33 @@ knitr::opts_chunk$set(
 )
 ```
 
+The non-profit organization Our Research regularly publishes snapshots of the Unpaywall service that contain a complete replication of the database to that point in time. These snapshots are often utilised by bibliometric databases and open access monitoring services. However, processing and querying large amounts of data is still a elaborate task. Lately, the rise of cloud computing has opened the doors for ... 
+
+In this blog post, I want to share a workflow for preparing und uploading Unpaywall snapshots to Google BigQuery. 
+
 ## Creating a Project
 
-## Installing and config gsutil
+## Installing and configuring gsutil
+
+In order to make things easier, [gsutil](https://cloud.google.com/storage/docs/gsutil), a command-line-tool developed by Google, will be used to interact with the Google Cloud environment. gsutil is written in Python an can be quickly downloaded by using the following command
 
 ```{bash eval=FALSE}
 sudo pip install gsutil
 ```
 
+Note, that the package is from the [Python Package Index (PyPI)](https://pypi.org). Thus, make sure that [pip](https://pypi.org/project/pip/) is installed. Alternatively, you can install the Google Cloud SDK which contains gsutil among many other utilities. A step by step instruction can be found [here](https://cloud.google.com/storage/docs/gsutil_install#install).
+
+After downloading, type
+
 ```{bash eval=FALSE}
 gsutil config
 ```
 
+Then, copy the displayed URL to your browser. Login with your correct Google account and allow Google Cloud SDK to access your account. Next, type the displayed authorization code into the gsutil prompt and press enter. Again, copy the displayed link into your browser to look up a project-id and enter it at the prompt. Authentication credentials (a generated key) will then be stored in a file called `.boto` in the home directory (check by running `ls -a` in the home directory).
+
 ## Preparing data
+
+In the next step, I create two directories. One called `upw_export` and the other `upw_snapshot`. However, you can name them as you like. By using [wget](https://www.gnu.org/software/wget/), I download a Unpaywall snapshot into the `upw_export` folder.
 
 ```{bash eval=FALSE}
 mkdir upw_export
@@ -42,13 +56,19 @@ wget -P upw_export \
 https://s3-us-west-2.amazonaws.com/unpaywall-data-snapshots/unpaywall_snapshot_2020-04-27T153236.jsonl.gz
 ```
 
+The next part consists practically of two tasks. I use the command `zcat` to decompress the downloaded snapshot file. This can also be done with the command `unpigz`. In fact, unpigz is generally faster, since it supports parallelized decompression while you can adjust the number of simultaneous processes. To process the JSON input, I apply the command-line-tool [jq](https://stedolan.github.io/jq/). jq is a fast and lightweight JSON processor which also allows for data formatting. In the following case, I extract publications, published between 2018 and 2019, from the Unpaywall snapshot. To only return the fields `doi`, `is_oa`, `oa_locations`, `oa_status` and `publisher`, I specify them in the jq filter. To speed things up, I use the programm [parallel](https://www.gnu.org/software/parallel/) in combination with jq. Keep in mind that the amount of time for execution expecially on this task is heavily dependent on your computer hardware. 
+
 ```{bash eval=FALSE}
 zcat upw_export/unpaywall_snapshot_2020-04-27T153236.jsonl.gz | parallel \
 --pipe --block 100M --jobs 6 --files --tmpdir upw_export/upw_snapshot --recend \
 '}\n' "jq -c 'select(.year >= 2018 and .year <= 2019) | {doi, is_oa, oa_locations, oa_status, publisher}'"
 ```
 
+After the script has finished, you will find multiple output files in the `upw_snapshot` directory. 
+
 ## Uploading data
+
+As you will see, each output file has a .par extension. Although the format doesn't seem different from the original JSON structure, I convert every file back to JSON Lines for the upcoming upload. As stated in the BigQuery documentation, currently only records in Avro, CSV, JSON, ORC, and Parquet format are allowed. Remind that storage on Google Cloud can be expensive. Also BigQuery can handle compressed files which is why I use `gzip` on `upw_snapshot` to shrink file size.
 
 ```{bash eval=FALSE}
 for file in upw_export/upw_snapshot/*.par
@@ -59,15 +79,55 @@ done
 gzip -r upw_export/upw_snapshot
 ```
 
+Finally, I upload the data into a Google Bucket with the following command
+
 ```{bash eval=FALSE}
-gsutil -m cp -r upw_export/upw_snapshot gs://oadoi_full
+gsutil -m cp -r upw_export/upw_snapshot gs://<bucket>
 ```
 
-## Creating Table
+## Creating Table in BigQuery
+
+BigQuery provides multiple options to create a data table. For more information consult the offical [documentation](https://cloud.google.com/bigquery/docs/tables). Here, I decided to go with the Cloud Powershell. You can open the Cloud Powershell in BigQuery by clicking the terminal button on the top right corner. Besides, you also have to specify a schema definition. A schema definition is a JSON file which describes the overall structure of your data. An [example schema]() is shared in the source code repository of this blog. You can use drag and drop on the Cloud Powershell to upload the schema file. After replacing the placeholder names in the following statement, execute it in the Cloud Powershell.
 
 ```{bash eval=FALSE}
 bq load --ignore_unknown_values --source_format=NEWLINE_DELIMITED_JSON \
-your-project:oadoi_full.<name-of-bq-table> \
-gs://oadoi_full/<name-of-snapshot-directory>/*.jsonl.gz \
-bq_schema_<snapshot-abbreviation>.json
+<project>:<dataset>.<name-of-bq-table> \
+gs://<bucket>/<name-of-snapshot-directory>/*.jsonl.gz \
+<name-of-schema-definition>.json
+```
+
+## Interface BigQuery with Python and R
+
+BigQuery clients exist for Python and R. To access BigQuery within Python use the package [google-cloud-bigquery](https://pypi.org/project/google-cloud-bigquery/). 
+
+```{python eval=FALSE}
+from google.cloud import bigquery
+
+client = bigquery.Client(project='<project>')
+
+client.query(f"""
+            SELECT * 
+            FROM `<dataset>.<name-of-bq-table>`
+            WHERE year=2019 AND genre="journal-article" 
+            LIMIT 10
+            """).to_dataframe()
+```
+
+To query BigQuery in R, use [DBI](https://cran.r-project.org/web/packages/DBI/index.html) and [bigrquery](https://cran.r-project.org/web/packages/bigrquery/index.html).
+
+```{r eval=FALSE}
+library(DBI)
+library(bigrquery)
+library(dplyr)
+library(tidyverse)
+
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "<project>",
+  dataset = "<dataset>"
+)
+
+tbl(con, "<name-of-bq-table>") %>%
+  filter(year == 2019, genre == "journal-article") %>%
+  head(10)
 ```
