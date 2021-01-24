@@ -1,9 +1,9 @@
 ---
-title: "Preparing and Uploading Unpawall data to BigQuery"
+title: "Preparing and Uploading Unpaywall data to BigQuery"
 description: Working with large datasets is generally non-trivial. In this blog post, I demonstrate how to process and import data snapshots from Unpaywall to Google BigQuery. 
 author: 
   - Nick Haupka
-date: January 18, 2020
+date: January 24, 2020
 preview: distill-preview.png
 creative_commons: CC BY
 output: distill::distill_article
@@ -19,23 +19,26 @@ knitr::opts_chunk$set(
 )
 ```
 
-The non-profit organization Our Research regularly publishes snapshots of the Unpaywall service that contain a complete replication of the database to that point in time. These snapshots are often utilised by bibliometric databases and open access monitoring services. However, processing and querying large amounts of data is still a elaborate task. Lately, the rise of cloud computing has opened the doors for ... 
+The non-profit organization Our Research regularly publishes snapshots of the Unpaywall service that contain a complete replication of the database to that point in time. These snapshots are often utilised by bibliometric databases and open access monitoring services. Usually, database dumps from Unpaywall are around 100GB in size when uncompressed, making them difficult for some to access. In this context, cloud computing has developed into a valuable service. At the SUB Göttingen, we utilize Google BigQuery to query and analyze large data sets such as Unpaywall snapshots. BigQuery is a cloud-based high-performance scalable analysis environment which allows to swiftly query large amounts of data in SQL. 
 
-In this blog post, I want to share a workflow for preparing und uploading Unpaywall snapshots to Google BigQuery. 
+Because there are ambiguities in dealing with Unpaywall snapshots, I want to share a workflow for preparing und uploading Unpaywall snapshots to Google BigQuery in this blog post. 
 
 ## Creating a Project
+Big Query is developed by Google. It comes as a Platform as a Service that requires you to have a Google account. 
+
+
 
 ## Installing and configuring gsutil
 
-In order to make things easier, [gsutil](https://cloud.google.com/storage/docs/gsutil), a command-line-tool developed by Google, will be used to interact with the Google Cloud environment. gsutil is written in Python an can be quickly downloaded by using the following command
+I use [gsutil](https://cloud.google.com/storage/docs/gsutil), a command-line-tool developed by Google, to interact with the Google Cloud environment. gsutil is written in Python an can be downloaded by using the following command:
 
 ```{bash eval=FALSE}
 sudo pip install gsutil
 ```
 
-Note, that the package is from the [Python Package Index (PyPI)](https://pypi.org). Thus, make sure that [pip](https://pypi.org/project/pip/) is installed. Alternatively, you can install the Google Cloud SDK which contains gsutil among many other utilities. A step by step instruction can be found [here](https://cloud.google.com/storage/docs/gsutil_install#install).
+Note, that the package is from the [Python Package Index (PyPI)](https://pypi.org) (make sure that [pip](https://pypi.org/project/pip/) is installed). Alternatively, you can install the Google Cloud SDK which contains gsutil among many other utilities. A step by step instruction can be found [here](https://cloud.google.com/storage/docs/gsutil_install#install).
 
-After downloading, type
+After downloading, type:
 
 ```{bash eval=FALSE}
 gsutil config
@@ -79,7 +82,7 @@ done
 gzip -r upw_export/upw_snapshot
 ```
 
-Finally, I upload the data into a Google Bucket with the following command
+Finally, I upload the data into a Google Bucket with the following command:
 
 ```{bash eval=FALSE}
 gsutil -m cp -r upw_export/upw_snapshot gs://<bucket>
